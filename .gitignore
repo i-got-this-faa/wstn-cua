@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src/native/libwstn_injector.so
+src/native/pw_stream
+src/native/*.o
+*.log
+.DS_Store

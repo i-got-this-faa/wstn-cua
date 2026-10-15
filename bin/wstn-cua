@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if command -v bun >/dev/null 2>&1; then
+  exec bun run "${SCRIPT_DIR}/src/cli/index.ts" "$@"
+else
+  exec node "${SCRIPT_DIR}/dist/cli/index.js" "$@"
+fi

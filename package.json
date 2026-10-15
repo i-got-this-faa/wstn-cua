@@ -1,0 +1,38 @@
+{
+  "name": "wstn-cua",
+  "version": "1.0.0",
+  "description": "Standalone Weston compositor binding and live streaming portal for OpenAI Computer Use Agents (CUA)",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "wstn-cua": "bin/wstn-cua"
+  },
+  "type": "module",
+  "scripts": {
+    "build:native": "make -C src/native",
+    "build:ts": "tsc",
+    "build": "make -C src/native && tsc",
+    "start": "bun run src/cli/index.ts start",
+    "test": "bun test tests/"
+  },
+  "keywords": [
+    "weston",
+    "wayland",
+    "computer-use",
+    "cua",
+    "openai",
+    "pipewire",
+    "portal",
+    "webrtc"
+  ],
+  "author": "Radhey",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.3"
+  }
+}
