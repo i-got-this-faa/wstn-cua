@@ -50,9 +50,9 @@ fi
 # 4. Build TypeScript
 echo "[*] Building TypeScript sources..."
 if [ "$JS_RUNNER" = "bun" ]; then
-  bun run build:ts || true
+  bun run build:ts
 else
-  npm run build:ts || true
+  npm run build:ts
 fi
 
 # 5. Ensure CLI is executable

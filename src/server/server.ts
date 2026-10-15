@@ -325,10 +325,21 @@ export class WstnCuaServer {
     }
 
     if (this.httpServer) {
-      await new Promise<void>((resolve) => {
-        this.httpServer?.close(() => resolve());
-      });
+      const httpServer = this.httpServer;
       this.httpServer = null;
+      await new Promise<void>((resolve) => {
+        // Keep-alive and upgraded WebSocket sockets survive close(), so a
+        // connected client would block shutdown forever. Close them explicitly.
+        const force = setTimeout(() => {
+          httpServer.closeAllConnections();
+          resolve();
+        }, 1000);
+        httpServer.close(() => {
+          clearTimeout(force);
+          resolve();
+        });
+        httpServer.closeIdleConnections();
+      });
     }
 
     if (this.streamManager && "stop" in this.streamManager && typeof this.streamManager.stop === "function") {

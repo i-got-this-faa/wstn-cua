@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
+import { appRootDir } from '../paths.js';
 import { queryPipeWireNodes } from './xdg-portal.js';
 
 /**
@@ -644,9 +644,11 @@ export class StreamManager {
   private async startNativeStream(): Promise<boolean> {
     const candidates = [
       this.config.nativeBinaryPath,
-      resolve(process.cwd(), 'src/native/pw_stream'),
-      resolve(process.cwd(), 'dist/native/pw_stream'),
       process.env['PW_STREAM_BIN'],
+      `${appRootDir}/src/native/pw_stream`,
+      `${appRootDir}/dist/native/pw_stream`,
+      `${process.cwd()}/src/native/pw_stream`,
+      `${process.cwd()}/pw_stream`,
     ].filter((p): p is string => typeof p === 'string' && p.length > 0);
 
     let binaryPath: string | null = null;

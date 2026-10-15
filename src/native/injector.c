@@ -1,6 +1,17 @@
 #define _GNU_SOURCE
 
+#ifndef WSTN_LIBWESTON_MAJOR
+#define WSTN_LIBWESTON_MAJOR 15
+#endif
+
+#if WSTN_LIBWESTON_MAJOR >= 16
+#include <libweston-16/libweston/libweston.h>
+#else
 #include <libweston-15/libweston/libweston.h>
+#endif
+#if WSTN_LIBWESTON_MAJOR > 16
+#error "Unknown libweston major version: add an include branch for it in injector.c"
+#endif
 #include <wayland-server.h>
 #include <linux/input-event-codes.h>
 #include <sys/socket.h>

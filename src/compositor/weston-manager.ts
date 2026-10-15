@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { appRootDir, findExecutable } from "../paths.js";
 
 export type WestonBackend = "pipewire" | "headless" | "wayland" | "x11" | "drm";
 
@@ -13,6 +14,7 @@ export interface WestonSupervisorOptions {
   readonly height?: number;
   readonly scale?: number;
   readonly backend?: WestonBackend | (string & {});
+  readonly westonBinary?: string;
   readonly injectorModulePath?: string;
   readonly socketName?: string;
   readonly inputSocketPath?: string;
@@ -45,6 +47,18 @@ const DEFAULT_BACKEND: WestonBackend = "pipewire";
 const DEFAULT_READY_TIMEOUT_MS = 6000;
 const MAX_LOG_HISTORY = 500;
 
+/**
+ * Locates the weston binary: explicit WSTN_WESTON_BIN, then PATH.
+ * Returns null when weston is not installed.
+ */
+export function resolveWestonBinary(env: NodeJS.ProcessEnv = process.env): string | null {
+  const override = env["WSTN_WESTON_BIN"];
+  if (override && override.length > 0) {
+    return findExecutable(override, env);
+  }
+  return findExecutable("weston", env);
+}
+
 export class WestonSupervisor {
   public readonly instanceId: string;
   public readonly width: number;
@@ -55,6 +69,7 @@ export class WestonSupervisor {
   public readonly inputSocketPath: string;
   public readonly xwaylandDisplay: string;
   public readonly pipewireNode: string;
+  public readonly injectorModulePath: string | null;
 
   private state: WestonState = "idle";
   private process: ChildProcess | null = null;
@@ -62,7 +77,7 @@ export class WestonSupervisor {
   private readonly logs: Array<{ readonly line: string; readonly source: "stdout" | "stderr"; readonly timestamp: number }> = [];
   private startedAt: number | null = null;
   private readonly readyTimeoutMs: number;
-  private readonly injectorModulePath: string | null;
+  private readonly westonBinary: string | null;
   private readonly logCallback?: ((line: string, source: "stdout" | "stderr") => void) | undefined;
 
   constructor(options: WestonSupervisorOptions = {}) {
@@ -78,30 +93,33 @@ export class WestonSupervisor {
     this.pipewireNode = "weston.pipewire";
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     this.logCallback = options.logCallback;
+    this.westonBinary = options.westonBinary ?? null;
 
     this.injectorModulePath = this.resolveInjectorModule(options.injectorModulePath);
   }
 
   private resolveInjectorModule(explicitPath?: string): string | null {
-    if (explicitPath && fs.existsSync(explicitPath)) {
-      return path.resolve(explicitPath);
+    const requested = explicitPath ?? process.env["WSTN_INJECTOR_MODULE"];
+    if (requested) {
+      return fs.existsSync(requested) ? path.resolve(requested) : null;
     }
 
-    const candidatePaths = [
+    const candidates = [
+      path.join(appRootDir, "src/native/libwstn_injector.so"),
+      path.join(appRootDir, "dist/native/libwstn_injector.so"),
       path.resolve(process.cwd(), "src/native/libwstn_injector.so"),
-      path.resolve(process.cwd(), "dist/native/libwstn_injector.so"),
       path.resolve(process.cwd(), "libwstn_injector.so"),
       "/usr/local/lib/libwstn_injector.so",
       "/usr/lib/libwstn_injector.so",
     ];
 
-    for (const candidate of candidatePaths) {
+    for (const candidate of candidates) {
       if (fs.existsSync(candidate)) {
         return candidate;
       }
     }
 
-    return explicitPath ?? null;
+    return null;
   }
 
   public getStatus(): WestonStatus {
@@ -134,6 +152,15 @@ export class WestonSupervisor {
   public async start(): Promise<void> {
     if (this.state === "running" || this.state === "starting") {
       return;
+    }
+
+    const westonBinary = this.westonBinary ?? resolveWestonBinary();
+    if (westonBinary === null) {
+      throw new Error(
+        "weston binary not found. Install weston (e.g. 'sudo pacman -S weston', " +
+          "'sudo apt-get install weston', or run inside the project nix dev shell) " +
+          "or point WSTN_WESTON_BIN at the binary."
+      );
     }
 
     this.state = "starting";
@@ -174,9 +201,9 @@ export class WestonSupervisor {
       PIPEWIRE_NODE_NAME: this.pipewireNode,
     };
 
-    this.appendLog(`Starting weston with: weston ${westonArgs.join(" ")}`, "stdout");
+    this.appendLog(`Starting weston with: ${westonBinary} ${westonArgs.join(" ")}`, "stdout");
 
-    const westonProc = spawn("weston", westonArgs, {
+    const westonProc = spawn(westonBinary, westonArgs, {
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -308,20 +335,24 @@ export class WestonSupervisor {
     }
 
     if (executable === "browser" || executable === "web-browser") {
+      const home = process.env["HOME"];
       const candidates = [
-        "/home/radhey/.local/bin/helium-browser",
-        "/home/radhey/.local/bin/google-chrome",
+        ...(home ? [path.join(home, ".local/bin/helium-browser"), path.join(home, ".local/bin/google-chrome")] : []),
         "helium-browser",
         "google-chrome",
         "chromium",
+        "brave-browser",
         "firefox",
       ];
-      for (const cand of candidates) {
-        if (cand.startsWith("/") ? fs.existsSync(cand) : true) {
-          executable = cand;
-          break;
-        }
+      const resolved = candidates
+        .map((candidate) => findExecutable(candidate))
+        .find((found): found is string => found !== null);
+      if (resolved === undefined) {
+        throw new Error(
+          "No supported browser found (looked for helium-browser, google-chrome, chromium, brave-browser, firefox)"
+        );
       }
+      executable = resolved;
     }
 
     const execBase = path.basename(executable).toLowerCase();

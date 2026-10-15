@@ -14,7 +14,7 @@ Any Linux user can install `wstn-cua` on their laptop to immediately get sandbox
   - Weston streams outputs directly to PipeWire (`weston.pipewire`).
   - Native `pw_stream` grabber captures uncompressed video buffers with zero copy.
   - HTTP Multipart MJPEG stream (`/v1/cua/stream`) allows any browser, dashboard, or agent to watch live 30/60 FPS video.
-  - WebRTC WHEP (WebRTC HTTP Egress Protocol) signaling endpoint for sub-100ms ultra-low latency browser playback.
+  - WebRTC WHEP signaling endpoints (`/v1/cua/whep`, JSON offer/ICE/close). Signaling only today; the media transport is not wired up yet.
   - Atomic zero-latency snapshot buffer (`/v1/cua/live-frame`) for instant frame retrieval (<1ms).
 - **OpenAI CUA Specification Compliant**:
   - Full implementation of OpenAI's Computer Use Agent specification (`type: "computer_use"`).
@@ -54,7 +54,7 @@ Any Linux user can install `wstn-cua` on their laptop to immediately get sandbox
 |                                         |  +---------------------------------+  | |
 |                                         |  +---------------------------------+  | |
 |                                         |  | Web Control Center UI           |  | |
-|                                         |  | - http://localhost:7860/        |  | |
+|                                         |  | - http://localhost:8080/        |  | |
 |                                         +--+---------------------------------+--+ |
 +-----------------------------------------------------------------------------------+
 ```
@@ -65,10 +65,16 @@ Any Linux user can install `wstn-cua` on their laptop to immediately get sandbox
 
 ### Requirements
 - Linux (x86_64 or aarch64)
-- `weston` (Wayland compositor)
+- `weston` (tested with 15.x; the build must include the PipeWire backend, `pipewire-backend.so`)
 - `pipewire` (Multimedia server)
 - `gcc` and `pkg-config` (for native injector compilation)
 - `bun` or `node` (>= 18)
+
+On NixOS:
+```bash
+nix develop
+```
+The dev shell provides weston, pipewire, the C toolchain, and bun. The flake pins nixpkgs to the stable 26.05 branch on purpose: weston 16 in nixpkgs unstable marks the PipeWire backend deprecated and ships without it.
 
 On Arch / CachyOS / Manjaro:
 ```bash
@@ -109,15 +115,17 @@ wstn-cua start
 ```
 Options:
 ```bash
-wstn-cua start --port 7860 --width 1280 --height 800 --headless
+wstn-cua start --port 8080 --width 1280 --height 800
 ```
-- `--port <number>`: Gateway port (default: `7860`).
+- `--port <number>`: Gateway port (default: `8080`).
 - `--width <number>`: Viewport width (default: `1280`).
 - `--height <number>`: Viewport height (default: `800`).
-- `--headless`: Run Weston headless (background server mode). Omit to show windowed Weston nested on your current desktop.
-- `--backend <name>`: Weston backend (`pipewire`, `headless`, `wayland`, `x11`).
+- `--backend <name>`: Weston backend (default: `pipewire`).
+  - `pipewire`: offscreen compositor that screencasts straight into PipeWire. This is what feeds the live video feed.
+  - `headless`: offscreen compositor without a PipeWire output; the stream falls back to synthetic frames.
+  - `wayland` / `x11`: nested window on your current desktop, so you can watch the sandbox live on screen.
 
-Open **http://localhost:7860** in your browser to access the Web Control Center!
+Open **http://localhost:8080** in your browser to access the Web Control Center!
 
 ### 2. Launching Applications Inside the Sandbox
 Launch any desktop application (browsers, terminals, text editors) directly inside the sandboxed Weston display:
@@ -139,7 +147,7 @@ wstn-cua action '{"action":"keypress","keys":"ctrl+shift+t"}'
 
 ### 4. Viewing the Agent's Virtual Monitor
 You can keep working on your laptop without interruption while the agent works on its isolated virtual monitor. To peek at what the agent is doing:
-- **Web Portal**: Visit `http://localhost:7860` in any browser.
+- **Web Portal**: Visit `http://localhost:8080` in any browser.
 - **Picture-in-Picture Floating Window**:
   ```bash
   wstn-cua view
@@ -183,12 +191,14 @@ Returns the standard OpenAI tool declaration schema:
       }
     }
   },
-  "display": { "width": 1280, "height": 800, "scale": 1, "backend": "headless" },
+  "display": { "width": 1280, "height": 800, "scale": 1, "backend": "pipewire", "environment": "linux" },
   "endpoints": {
-    "portal_url": "http://127.0.0.1:7860",
-    "stream_url": "http://127.0.0.1:7860/v1/cua/stream",
-    "live_frame_url": "http://127.0.0.1:7860/v1/cua/live-frame",
-    "session_ws": "ws://127.0.0.1:7860/v1/cua/session"
+    "portal_url": "http://localhost:8080",
+    "stream_url": "http://localhost:8080/v1/cua/stream",
+    "live_frame_url": "http://localhost:8080/v1/cua/live-frame",
+    "actions_url": "http://localhost:8080/v1/cua/actions",
+    "session_ws": "ws://localhost:8080/v1/cua/session",
+    "portal_ws": "ws://localhost:8080/v1/cua/portal"
   }
 }
 ```
@@ -197,7 +207,7 @@ Returns the standard OpenAI tool declaration schema:
 Continuous multipart MJPEG stream (`Content-Type: multipart/x-mixed-replace; boundary=frame`).
 Display in any browser or HTML viewer:
 ```html
-<img src="http://localhost:7860/v1/cua/stream" alt="Live Weston Desktop" />
+<img src="http://localhost:8080/v1/cua/stream" alt="Live Weston Desktop" />
 ```
 
 ### 3. Instant Snapshot: `GET /v1/cua/live-frame`
@@ -233,7 +243,7 @@ Compatible with standard OpenAI client SDKs:
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:7860/v1", api_key="dummy")
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="dummy")
 
 response = client.chat.completions.create(
     model="gpt-4o",
@@ -247,18 +257,36 @@ Streams out live video frames (`{ "type": "frame", "frameId": 12, "image": "data
 
 ---
 
+## Development
+
+```bash
+nix develop            # weston 15, pipewire, gcc, pkg-config, bun
+make                   # builds both native modules and type-checks TypeScript
+bun test tests/        # test suite; compositor-dependent suites skip without weston
+scripts/e2e.sh         # full end-to-end proof against a real weston + PipeWire session
+```
+
+`scripts/e2e.sh` starts the real CLI and checks the whole path: the injector socket answers `PING`/`INFO`, live frames come from PipeWire capture (the synthetic fallback is rejected), typed input changes the rendered output, the MJPEG stream emits multipart frames, and the agent WebSocket streams frames and executes actions.
+
+Environment variables (all optional):
+- `WSTN_WESTON_BIN`: use a specific `weston` binary instead of the one on `PATH`.
+- `WSTN_INJECTOR_MODULE`: use a `libwstn_injector.so` built outside the repository.
+- `PW_STREAM_BIN`: use a `pw_stream` capture helper built outside the repository.
+
+---
+
 ## Testing & Quality Verification
 
-All components are strictly typed and verified against real runtimes in compliance with `/home/radhey/fleet/AGENTS.md` and `/home/radhey/fleet/RULES.md`:
+The project is strictly typed and verified against real runtimes:
 
 ```bash
 make test
 ```
 
-Test Results:
-- **74 tests passing**, 0 failed across 4 test suites (`tests/cua-actions.test.ts`, `tests/pipewire-stream.test.ts`, `tests/server-and-supervisor.test.ts`, `tests/full-lifecycle.test.ts`).
+- The full suite passes against a real weston compositor: 75 tests across 4 files (`tests/cua-actions.test.ts`, `tests/pipewire-stream.test.ts`, `tests/server-and-supervisor.test.ts`, `tests/full-lifecycle.test.ts`).
+- Suites that need a compositor are skipped automatically when `weston` is not on `PATH`, so the rest of the suite still runs (and passes) on machines without weston.
 - Full TypeScript type-checking (`tsc`) passing with `exactOptionalPropertyTypes: true`, `noImplicitAny: true`, and `noUncheckedIndexedAccess: true`.
-- Zero compiler warnings or errors on native C modules.
+- The native C modules compile warning-free with `-Wall -Wextra`.
 
 ---
 

@@ -66,8 +66,6 @@ async function commandStart(args: string[]): Promise<void> {
       width = parseInt(args[++i]!, 10);
     } else if (arg === "--height" && args[i + 1]) {
       height = parseInt(args[++i]!, 10);
-    } else if (arg === "--headless") {
-      backend = "pipewire";
     } else if (arg === "--backend" && args[i + 1]) {
       backend = args[++i]!;
     }
@@ -90,7 +88,14 @@ async function commandStart(args: string[]): Promise<void> {
   try {
     await supervisor.start();
   } catch (err) {
-    console.warn(`[wstn-cua] Note: Weston supervisor started with warning: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[wstn-cua] Failed to start the Weston sandbox: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[wstn-cua] The CUA portal needs a running Weston display; not starting the gateway.`);
+    process.exit(1);
+  }
+
+  if (supervisor.injectorModulePath === null) {
+    console.warn(`[wstn-cua] Warning: libwstn_injector.so was not found (build it with 'make native').`);
+    console.warn(`[wstn-cua] Input actions (move/click/type) will have no effect until it is built.`);
   }
 
   const server = new WstnCuaServer({
@@ -312,7 +317,7 @@ async function commandStop(): Promise<void> {
 
 async function commandView(): Promise<void> {
   const state = loadState();
-  const port = state?.port ?? 7860;
+  const port = state?.port ?? 8080;
   const streamUrl = `http://localhost:${port}/v1/cua/stream`;
   const portalUrl = `http://localhost:${port}`;
 
@@ -346,7 +351,7 @@ function printHelp(): void {
 wstn-cua: Weston Wayland Compositor Supervisor & CUA Portal CLI
 
 Usage:
-  wstn-cua start [--port <n>] [--width <w>] [--height <h>] [--headless] [--backend <bkg>]
+  wstn-cua start [--port <n>] [--width <w>] [--height <h>] [--backend <name>]
   wstn-cua run <command...>
   wstn-cua view
   wstn-cua status

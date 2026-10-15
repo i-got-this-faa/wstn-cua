@@ -1,9 +1,18 @@
 import { describe, it, expect, afterAll, beforeAll } from 'bun:test';
-import { WestonSupervisor } from '../src/compositor/weston-manager.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { WestonSupervisor, resolveWestonBinary } from '../src/compositor/weston-manager.js';
 import { WstnCuaServer } from '../src/server/server.js';
+import { sendDirectSocketCommand } from '../src/server/routes.js';
+import { StreamManager } from '../src/portal/stream-manager.js';
+import { appRootDir } from '../src/paths.js';
 import { WebSocket } from 'ws';
 
-describe('Full Lifecycle Integration Test', () => {
+const westonBinary = resolveWestonBinary();
+const injectorModulePath = path.join(appRootDir, 'src/native/libwstn_injector.so');
+const hasInjectorModule = fs.existsSync(injectorModulePath);
+
+describe.skipIf(westonBinary === null)('Full Lifecycle Integration Test', () => {
   let supervisor: WestonSupervisor | null = null;
   let server: WstnCuaServer | null = null;
   const testPort = 19876;
@@ -27,16 +36,16 @@ describe('Full Lifecycle Integration Test', () => {
     server = new WstnCuaServer({
       port: testPort,
       weston: supervisor,
-      streamManagerOptions: {
+      streamManager: new StreamManager({
         mode: 'synthetic', // reliably emits frames for integration test
         fps: 30,
         width: 1280,
         height: 800,
-      },
+      }),
     });
 
     await server.start();
-  });
+  }, 30_000);
 
   afterAll(async () => {
     if (server) {
@@ -45,7 +54,7 @@ describe('Full Lifecycle Integration Test', () => {
     if (supervisor) {
       await supervisor.stop();
     }
-  });
+  }, 30_000);
 
   it('verifies compositor status and wayland environment', () => {
     expect(supervisor).not.toBeNull();
@@ -152,5 +161,15 @@ describe('Full Lifecycle Integration Test', () => {
       child.on('exit', (code) => resolve(code));
     });
     expect(exitCode).toBe(0);
+  });
+
+  it.skipIf(!hasInjectorModule)('answers PING and INFO on the native injector socket', async () => {
+    expect(supervisor).not.toBeNull();
+    const pong = await sendDirectSocketCommand(supervisor!.inputSocketPath, 'PING');
+    expect(pong).toContain('PONG');
+
+    const info = await sendDirectSocketCommand(supervisor!.inputSocketPath, 'INFO');
+    expect(info).toContain('width=1280');
+    expect(info).toContain('height=800');
   });
 });

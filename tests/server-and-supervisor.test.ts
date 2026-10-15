@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { WebSocket } from "ws";
-import { WestonSupervisor } from "../src/compositor/weston-manager.js";
+import { WestonSupervisor, resolveWestonBinary } from "../src/compositor/weston-manager.js";
 import { WstnCuaServer } from "../src/server/server.js";
 
-describe("WestonSupervisor and WstnCuaServer", () => {
+const westonBinary = resolveWestonBinary();
+
+describe.skipIf(westonBinary === null)("WestonSupervisor and WstnCuaServer", () => {
   const TEST_PORT = 18888;
   let supervisor: WestonSupervisor;
   let server: WstnCuaServer;
@@ -24,12 +26,12 @@ describe("WestonSupervisor and WstnCuaServer", () => {
 
     const res = await server.start();
     portalUrl = res.portalUrl;
-  });
+  }, 30_000);
 
   afterAll(async () => {
     await server.stop();
     await supervisor.stop();
-  });
+  }, 30_000);
 
   it("should initialize WestonSupervisor with correct configuration", () => {
     const status = supervisor.getStatus();
